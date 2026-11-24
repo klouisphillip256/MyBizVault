@@ -50,12 +50,16 @@ def send_invitation(db: DbSession, business_id: str, transaction_id: str,
     recipient = customer.email if channel == "email" else customer.phone
     check_delivery(channel, recipient)
     result = create_invitation(db, business_id, transaction_id, proposal_id)
+    from app.modules import communications
+    attempt = communications.start(db, business_id, transaction_id, None, proposal.id, channel, recipient)
     try:
-        send_message(channel, recipient, f"Review a proposal from {business.name}",
+        delivery = send_message(channel, recipient, f"Review a proposal from {business.name}",
             f"{business.name} invites you to review a proposed change. Open this private link:\n{result['review_url']}\n\nThe link expires in seven days. Do not forward it.")
     except HTTPException as failure:
-        return {**result, "delivery": "failed", "delivery_error": failure.detail}
-    return {**result, "delivery": channel}
+        communications.fail(db, attempt, str(failure.detail))
+        return {**result, "delivery": "failed", "delivery_status": "failed", "delivery_error": failure.detail}
+    communications.finish(db, attempt, delivery)
+    return {**result, "delivery": channel, "delivery_status": attempt.status}
 
 
 def invitation_for_token(db: DbSession, token: str | None,

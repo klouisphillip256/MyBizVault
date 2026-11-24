@@ -100,7 +100,7 @@ def test_message_delivery_requires_explicit_action_and_configuration(clients, mo
     proposal = owner.post(base + "/negotiations", headers=csrf(owner), json={
         "kind": "payment_dispute", "proposal": "Please review this delivery disagreement"}).json()
     send_path = base + f"/negotiations/{proposal['id']}/invitation/send"
-    assert owner.get("/api/delivery/capabilities").json() == {"email": False, "sms": False}
+    assert owner.get("/api/delivery/capabilities").json() == {"email": False, "sms": False, "whatsapp": False, "ussd": False}
     assert owner.post(send_path, headers=csrf(owner), json={"channel": "sms"}).status_code == 503
     assert owner.post(send_path, json={"channel": "sms"}).status_code == 403
     calls = []

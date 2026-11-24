@@ -96,6 +96,8 @@ def create_payment(db: DbSession, business_id: str, transaction_id: str,
                            status="reported", created_by_user_id=user_id)
     db.add(record)
     db.flush()
+    from app.modules import receipts
+    receipts.create_for_payment(db, transaction, record)
     event(db, transaction, user_id, "payment_reported", record.note, payment_id=record.id)
     db.commit()
     return payment_data(record)

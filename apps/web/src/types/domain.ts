@@ -2,6 +2,8 @@ export interface Membership {
   id: string
   business_id: string
   business_name: string
+  business_phone: string | null
+  business_email: string | null
   role: 'owner' | 'staff'
   can_view_transactions: boolean
   can_create_transactions: boolean
@@ -33,6 +35,7 @@ export interface Transaction {
   counterparty_id: string
   counterparty_name: string
   description: string
+  line_items: { description: string; quantity: number; unit_price_ugx: number }[]
   transaction_date: string
   total_ugx: number
   paid_ugx: number
@@ -46,6 +49,28 @@ export interface Transaction {
   delivery_notes: string | null
   payment_record_status: 'reported'
   created_at: string
+}
+
+export interface ReceiptSummary {
+  id: string
+  transaction_id: string
+  payment_id: string | null
+  kind: 'initial' | 'payment'
+  amount_ugx: number
+  payment_date: string
+  payment_status_at_issue: string
+  created_at: string
+  sha256: string
+}
+
+export interface TransactionDetail extends Transaction {
+  customer_phone: string | null
+  customer_email: string | null
+  receipts: ReceiptSummary[]
+  payments: PaymentRecord[]
+  approval_history: ObligationEvent[]
+  communications: { id: string; channel: string; provider: string; recipient_masked: string; status: string; detail: string | null; created_at: string; updated_at: string }[]
+  agreement: { id: string; status: AgreementStatus; current_version: number } | null
 }
 
 export interface StaffMember {
@@ -141,6 +166,7 @@ export interface ExternalReview {
   balance_ugx: number
   due_date: string
   development_verification: boolean
+  verification_delivery_available: boolean
   identity_verified: false
   expires_at: string
 }
@@ -149,7 +175,8 @@ export interface InvitationResult {
   review_url: string
   expires_at: string
   version_id: string
-  delivery: 'manual' | 'email' | 'sms' | 'failed'
+  delivery: 'manual' | 'email' | 'sms' | 'whatsapp' | 'failed'
+  delivery_status?: 'simulated' | 'submitted' | 'delivered' | 'failed'
   delivery_error?: string
   identity_verified: false
 }

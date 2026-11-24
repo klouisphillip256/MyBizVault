@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -30,6 +30,8 @@ class Business(Base):
     __tablename__ = "businesses"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     name: Mapped[str] = mapped_column(String(160))
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(254), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -86,6 +88,7 @@ class Transaction(Base):
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     client_request_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     description: Mapped[str] = mapped_column(String(500))
+    line_items_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     transaction_date: Mapped[date] = mapped_column(Date)
     total_ugx: Mapped[int] = mapped_column(Integer)
     paid_ugx: Mapped[int] = mapped_column(Integer)
@@ -135,6 +138,7 @@ class ConfirmationChallenge(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     invitation_id: Mapped[str] = mapped_column(ForeignKey("agreement_invitations.id"), index=True)
     code_hash: Mapped[str] = mapped_column(String(200))
+    delivery_channel: Mapped[str | None] = mapped_column(String(24), nullable=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -147,9 +151,22 @@ class ConfirmationEvent(Base):
     agreement_id: Mapped[str] = mapped_column(ForeignKey("agreements.id"), index=True)
     agreement_version_id: Mapped[str] = mapped_column(ForeignKey("agreement_versions.id"))
     invitation_id: Mapped[str] = mapped_column(ForeignKey("agreement_invitations.id"))
+    counterparty_id: Mapped[str | None] = mapped_column(ForeignKey("counterparties.id"), nullable=True)
     action: Mapped[str] = mapped_column(String(24))
     verification_method: Mapped[str] = mapped_column(String(32))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class UssdApproval(Base):
+    __tablename__ = "ussd_approvals"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    invitation_id: Mapped[str] = mapped_column(ForeignKey("agreement_invitations.id"), unique=True)
+    reference: Mapped[str] = mapped_column(String(12), unique=True, index=True)
+    code_hash: Mapped[str] = mapped_column(String(200))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -205,6 +222,15 @@ class DocumentEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
+class StoredObject(Base):
+    """Private document bytes for serverless deployments without a bucket."""
+    __tablename__ = "stored_objects"
+    key: Mapped[str] = mapped_column(String(300), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(80))
+    data: Mapped[bytes] = mapped_column(LargeBinary)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
 class PaymentRecord(Base):
     __tablename__ = "payment_records"
     __table_args__ = (CheckConstraint("amount_ugx > 0", name="ck_payment_amount_positive"),)
@@ -219,6 +245,42 @@ class PaymentRecord(Base):
     status: Mapped[str] = mapped_column(String(24), default="reported")
     created_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Receipt(Base):
+    """Immutable facts captured when a payment is first reported."""
+    __tablename__ = "receipts"
+    __table_args__ = (
+        UniqueConstraint("payment_id", name="uq_receipt_payment"),
+        Index("uq_receipt_initial_transaction", "transaction_id", unique=True,
+              postgresql_where=text("kind = 'initial'"), sqlite_where=text("kind = 'initial'")),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    transaction_id: Mapped[str] = mapped_column(ForeignKey("transactions.id"), index=True)
+    payment_id: Mapped[str | None] = mapped_column(ForeignKey("payment_records.id"), nullable=True)
+    kind: Mapped[str] = mapped_column(String(24))
+    snapshot_json: Mapped[str] = mapped_column(Text)
+    snapshot_sha256: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class CommunicationLog(Base):
+    __tablename__ = "communication_logs"
+    __table_args__ = (Index("ix_communication_logs_business_transaction", "business_id", "transaction_id"),)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"))
+    transaction_id: Mapped[str] = mapped_column(ForeignKey("transactions.id"))
+    agreement_id: Mapped[str | None] = mapped_column(ForeignKey("agreements.id"), nullable=True)
+    proposal_id: Mapped[str | None] = mapped_column(ForeignKey("negotiation_records.id"), nullable=True)
+    channel: Mapped[str] = mapped_column(String(24))
+    provider: Mapped[str] = mapped_column(String(32))
+    provider_message_id: Mapped[str | None] = mapped_column(String(180), nullable=True)
+    recipient_masked: Mapped[str] = mapped_column(String(254))
+    status: Mapped[str] = mapped_column(String(24))
+    detail: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
 class NegotiationRecord(Base):

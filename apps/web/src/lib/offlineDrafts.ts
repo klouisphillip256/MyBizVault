@@ -6,6 +6,7 @@ export interface TransactionDraftValues {
   paid_ugx: number
   due_date: string
   delivery_notes: string
+  line_items?: { description: string; quantity: number; unit_price_ugx: number }[]
 }
 
 export interface OfflineTransactionDraft {

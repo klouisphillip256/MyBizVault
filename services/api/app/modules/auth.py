@@ -60,7 +60,9 @@ def csrf_session(request: Request, actor: tuple[User, Session] = Depends(current
 def membership_data(db: DbSession, membership: Membership) -> dict:
     business = db.get(Business, membership.business_id)
     return {"id": membership.id, "business_id": membership.business_id,
-            "business_name": business.name if business else "", "role": membership.role,
+            "business_name": business.name if business else "",
+            "business_phone": business.phone if business else None,
+            "business_email": business.email if business else None, "role": membership.role,
             "can_view_transactions": membership.role == "owner" or membership.can_view_transactions or membership.can_manage_agreements or membership.can_manage_obligations,
             "can_create_transactions": membership.role == "owner" or membership.can_create_transactions,
             "can_manage_customers": membership.role == "owner" or membership.can_manage_customers,

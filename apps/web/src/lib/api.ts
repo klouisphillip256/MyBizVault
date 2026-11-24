@@ -1,5 +1,5 @@
 import axios from 'axios'
-import type { AgreementDetail, AgreementSummary, Counterparty, CurrentUser, DocumentCategory, DocumentDetail, DocumentSummary, ExternalProposalReview, ExternalReview, HealthResponse, InvitationResult, NegotiationKind, NegotiationRecord, ObligationEvent, PaymentRecord, StaffMember, Transaction } from '../types/domain'
+import type { AgreementDetail, AgreementSummary, Counterparty, CurrentUser, DocumentCategory, DocumentDetail, DocumentSummary, ExternalProposalReview, ExternalReview, HealthResponse, InvitationResult, NegotiationKind, NegotiationRecord, ObligationEvent, PaymentRecord, StaffMember, Transaction, TransactionDetail } from '../types/domain'
 
 const api = axios.create({ baseURL: '/api', timeout: 10000, withCredentials: true })
 
@@ -26,7 +26,7 @@ export async function getHealth(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>('/health')
   return data
 }
-export const getDeliveryCapabilities = async () => (await api.get<{ email: boolean; sms: boolean }>('/delivery/capabilities')).data
+export const getDeliveryCapabilities = async () => (await api.get<{ email: boolean; sms: boolean; whatsapp: boolean; ussd: boolean }>('/delivery/capabilities')).data
 
 export const getMe = async () => (await api.get<CurrentUser>('/auth/me')).data
 export const registerOwner = async (input: { full_name: string; email: string; password: string; business_name: string }) => (await api.post<CurrentUser>('/auth/register', input)).data
@@ -36,20 +36,24 @@ export const getCustomers = async (businessId: string) => (await api.get<Counter
 export const createCustomer = async (businessId: string, input: { display_name: string; phone?: string; email?: string; notes?: string }) => (await api.post<Counterparty>(`/businesses/${businessId}/customers`, input)).data
 export const updateCustomer = async (businessId: string, customerId: string, input: { display_name: string; phone?: string; email?: string; notes?: string }) => (await api.put<Counterparty>(`/businesses/${businessId}/customers/${customerId}`, input)).data
 export const getTransactions = async (businessId: string) => (await api.get<Transaction[]>(`/businesses/${businessId}/transactions`)).data
-export const createTransaction = async (businessId: string, input: { counterparty_id: string; client_request_id?: string; description: string; transaction_date: string; total_ugx: number; paid_ugx: number; due_date: string | null; delivery_notes?: string }) => (await api.post<Transaction>(`/businesses/${businessId}/transactions`, input)).data
+export const getTransaction = async (businessId: string, transactionId: string) => (await api.get<TransactionDetail>(`/businesses/${businessId}/transactions/${transactionId}`)).data
+export const getReceiptPdf = async (businessId: string, transactionId: string, receiptId: string) => (await api.get<Blob>(`/businesses/${businessId}/transactions/${transactionId}/receipts/${receiptId}/pdf`, { responseType: 'blob' })).data
+export const getAgreementPdf = async (businessId: string, agreementId: string, version?: number) => (await api.get<Blob>(`/businesses/${businessId}/agreements/${agreementId}/pdf`, { responseType: 'blob', params: version ? { version } : undefined })).data
+export const createTransaction = async (businessId: string, input: { counterparty_id: string; client_request_id?: string; description: string; line_items?: { description: string; quantity: number; unit_price_ugx: number }[]; transaction_date: string; total_ugx: number; paid_ugx: number; due_date: string | null; delivery_notes?: string }) => (await api.post<Transaction>(`/businesses/${businessId}/transactions`, input)).data
 export const getStaff = async (businessId: string) => (await api.get<StaffMember[]>(`/businesses/${businessId}/staff`)).data
 export const createStaff = async (businessId: string, input: { full_name: string; email: string; password: string; can_view_transactions: boolean; can_create_transactions: boolean; can_manage_customers: boolean; can_manage_agreements: boolean; can_view_documents: boolean; can_manage_documents: boolean; can_manage_obligations: boolean }) => (await api.post<StaffMember>(`/businesses/${businessId}/staff`, input)).data
 export const updateStaff = async (businessId: string, staffId: string, input: Pick<StaffMember, 'can_view_transactions' | 'can_create_transactions' | 'can_manage_customers' | 'can_manage_agreements' | 'can_view_documents' | 'can_manage_documents' | 'can_manage_obligations' | 'is_active'>) => (await api.patch<StaffMember>(`/businesses/${businessId}/staff/${staffId}`, input)).data
-export const updateBusiness = async (businessId: string, name: string) => (await api.patch(`/businesses/${businessId}`, { name })).data
+export const updateBusiness = async (businessId: string, input: { name: string; phone?: string; email?: string }) => (await api.patch(`/businesses/${businessId}`, input)).data
 export const getAgreements = async (businessId: string) => (await api.get<AgreementSummary[]>(`/businesses/${businessId}/agreements`)).data
 export const getAgreement = async (businessId: string, agreementId: string) => (await api.get<AgreementDetail>(`/businesses/${businessId}/agreements/${agreementId}`)).data
 export const createAgreement = async (businessId: string, transactionId: string) => (await api.post<AgreementDetail>(`/businesses/${businessId}/agreements`, { transaction_id: transactionId })).data
 export const reviseAgreement = async (businessId: string, agreementId: string, content: string) => (await api.put<AgreementDetail>(`/businesses/${businessId}/agreements/${agreementId}/draft`, { content })).data
 export const createInvitation = async (businessId: string, agreementId: string) => (await api.post<InvitationResult>(`/businesses/${businessId}/agreements/${agreementId}/invitation`)).data
-export const sendAgreementInvitation = async (businessId: string, agreementId: string, channel: 'email' | 'sms') => (await api.post<InvitationResult & { delivery_error?: string }>(`/businesses/${businessId}/agreements/${agreementId}/invitation/send`, { channel })).data
+export const sendAgreementInvitation = async (businessId: string, agreementId: string, channel: 'email' | 'sms' | 'whatsapp') => (await api.post<InvitationResult & { delivery_error?: string }>(`/businesses/${businessId}/agreements/${agreementId}/invitation/send`, { channel })).data
+export const sendUssdApproval = async (businessId: string, agreementId: string) => (await api.post<{ status: string; reference?: string; expires_at?: string; review_url: string; error?: string }>(`/businesses/${businessId}/agreements/${agreementId}/ussd/send`)).data
 const invitationHeaders = (token: string) => ({ 'X-Invitation-Token': token })
 export const getExternalReview = async (token: string) => (await api.get<ExternalReview>('/external/review', { headers: invitationHeaders(token) })).data
-export const requestDevelopmentCode = async (token: string) => (await api.post<{ development_code: string; expires_at: string; warning: string }>('/external/challenge', {}, { headers: invitationHeaders(token) })).data
+export const requestDevelopmentCode = async (token: string) => (await api.post<{ development_code?: string; expires_at: string; delivery: 'development' | 'sms' | 'email'; delivery_status: string; warning: string }>('/external/challenge', {}, { headers: invitationHeaders(token) })).data
 export const acceptExternalAgreement = async (token: string, versionId: string, code: string) => (await api.post<{ status: string; version_id: string }>('/external/accept', { version_id: versionId, code, explicitly_accepted: true }, { headers: invitationHeaders(token) })).data
 export const respondExternalAgreement = async (token: string, versionId: string, action: 'rejected' | 'correction_requested', note: string) => (await api.post<{ status: string }>('/external/respond', { version_id: versionId, action, note }, { headers: invitationHeaders(token) })).data
 export const listDocuments = async (businessId: string, q: string, category: string) => (await api.get<DocumentSummary[]>(`/businesses/${businessId}/documents`, { params: { q: q || undefined, category: category || undefined } })).data
@@ -74,7 +78,7 @@ export const createNegotiation = async (businessId: string, transactionId: strin
 export const respondNegotiation = async (businessId: string, transactionId: string, negotiationId: string, action: 'accepted' | 'declined' | 'withdrawn' | 'resolved', note: string) => (await api.post<NegotiationRecord>(`${obligationPath(businessId, transactionId)}/negotiations/${negotiationId}/response`, { action, note })).data
 export const getObligationHistory = async (businessId: string, transactionId: string) => (await api.get<ObligationEvent[]>(`${obligationPath(businessId, transactionId)}/obligation-history`)).data
 export const createProposalInvitation = async (businessId: string, transactionId: string, proposalId: string) => (await api.post<{ review_url: string; expires_at: string; proposal_id: string; delivery: 'manual'; identity_verified: false }>(`${obligationPath(businessId, transactionId)}/negotiations/${proposalId}/invitation`)).data
-export const sendProposalInvitation = async (businessId: string, transactionId: string, proposalId: string, channel: 'email' | 'sms') => (await api.post<{ review_url: string; expires_at: string; proposal_id: string; delivery: 'email' | 'sms' | 'failed'; delivery_error?: string }>(`${obligationPath(businessId, transactionId)}/negotiations/${proposalId}/invitation/send`, { channel })).data
+export const sendProposalInvitation = async (businessId: string, transactionId: string, proposalId: string, channel: 'email' | 'sms' | 'whatsapp') => (await api.post<{ review_url: string; expires_at: string; proposal_id: string; delivery: 'email' | 'sms' | 'whatsapp' | 'failed'; delivery_status?: string; delivery_error?: string }>(`${obligationPath(businessId, transactionId)}/negotiations/${proposalId}/invitation/send`, { channel })).data
 export const getExternalProposal = async (token: string) => (await api.get<ExternalProposalReview>('/external/proposal', { headers: invitationHeaders(token) })).data
 export const requestProposalCode = async (token: string) => (await api.post<{ development_code: string; expires_at: string; warning: string }>('/external/proposal/challenge', {}, { headers: invitationHeaders(token) })).data
 export const respondExternalProposal = async (token: string, input: { proposal_id: string; action: 'accepted' | 'declined' | 'correction_requested'; note?: string; code?: string; explicitly_accepted?: boolean }) => (await api.post<{ status: string; proposal_id: string; identity_verified: false }>('/external/proposal/respond', input, { headers: invitationHeaders(token) })).data

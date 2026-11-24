@@ -1,39 +1,63 @@
-# Trial hosting plan
+# Vercel and Neon deployment
 
-Keep one private GitHub repository, with two deployable applications:
+The root `vercel.json` routes `/api/*` to FastAPI and all other paths to the Vite frontend in one Vercel project. The browser and API share an origin, preserving the existing session cookie and CSRF model. The frontend uses relative `/api` requests. The `apps/web/vercel.json` file provides SPA fallback if the frontend is deployed separately.
 
-| Railway service | Source | Purpose |
-| --- | --- | --- |
-| `web` | Repository root, `Dockerfile.web` | React app served by Caddy; public HTTPS domain |
-| `api` | `services/api`, its `Dockerfile` | FastAPI; private Railway network only |
-| `Postgres` | Railway PostgreSQL template | Persistent relational data |
-| Bucket | Railway private storage bucket | Vault file bytes |
+## Prerequisites
 
-The frontend proxies `/api/*` to `api.railway.internal:8000`. This preserves the browser's single origin, which the current session cookies and CSRF checks require. Name the API service exactly `api`; if the name differs, change the upstream in `apps/web/Caddyfile`. Expose only `web` to the public internet. Keep the database and bucket private.
+Create a Neon PostgreSQL database and keep its connection string private. Use a direct connection for Alembic migrations; the API may use a pooled URL. Back up a populated database before upgrading it. The schema must reach revision `0014_unique_initial_receipts`. Restore a tested backup to undo a release involving data; downgrading a populated schema may discard newer records.
 
-## Railway setup
+Create a Vercel project from the private GitHub repository with the repository root as project root. The root `vercel.json` declares frontend (`apps/web`) and backend (`services/api`) services. The backend uses Python 3.13 and `app.main:app`. Confirm both services and the `/api/*` route in deployment output.
 
-1. Connect the **private** GitHub repository to a new Railway project. Add PostgreSQL and a private bucket.
-2. Add the `api` service from the same repository. Set its root directory to `/services/api`; Railway will use `services/api/Dockerfile`. Set `PORT=8000`. Do not generate a public domain for this service. The container applies Alembic migrations before starting; use one API replica for this prototype.
-3. Set API variables using Railway's variable references, choosing the actual names shown by your Postgres and bucket services:
+Set backend environment variables, replacing the domain with the actual Vercel domain:
 
-   ```text
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   FRONTEND_ORIGIN=https://YOUR-WEB-DOMAIN
-   COOKIE_SECURE=true
-   DEVELOPMENT_VERIFICATION=false
-   STORAGE_BACKEND=s3
-   S3_BUCKET=${{Bucket.BUCKET}}
-   S3_ENDPOINT_URL=${{Bucket.ENDPOINT}}
-   S3_REGION=${{Bucket.REGION}}
-   AWS_ACCESS_KEY_ID=${{Bucket.ACCESS_KEY_ID}}
-   AWS_SECRET_ACCESS_KEY=${{Bucket.SECRET_ACCESS_KEY}}
-   ```
+```text
+DATABASE_URL=postgresql://...NEON_CONNECTION...
+FRONTEND_ORIGIN=https://YOUR-VERCEL-DOMAIN
+COOKIE_SECURE=true
+DEVELOPMENT_VERIFICATION=false
+STORAGE_BACKEND=database
+```
 
-   The API accepts Railway's ordinary `postgresql://` URL and selects the installed psycopg v3 driver. Confirm the bucket variable names and endpoint shown in your Railway dashboard. Do not paste credentials into Git.
-4. Add the `web` service from the same repository. Set root directory to `/` and Dockerfile path to `Dockerfile.web`; set `PORT=8080`. Generate a public domain. Put that exact `https://...` origin in the API's `FRONTEND_ORIGIN` and redeploy the API. The web and API services must be in the same Railway project/environment so private networking works.
-5. Check `https://YOUR-WEB-DOMAIN/api/health`, registration/login, and a Vault upload/download. Test an invitation with `DEVELOPMENT_VERIFICATION=false`; acceptance will remain unavailable until independent verification is implemented.
+Database storage keeps private Vault bytes outside the serverless function filesystem. It is intended for the prototype's 10 MB per file limit; assess storage cost as usage grows. Session, invitation, and code state are database backed; no continuously running worker is needed.
 
-Railway's new-account trial gives a one-time credit for 30 days. Its continuing Free plan has a smaller monthly usage allowance; the web, API, and Postgres may exceed it. Set a spend limit and review usage before the trial expires. Do not rely on a container filesystem or SQLite for deployed records. Back up both PostgreSQL and the bucket before trusting the service with real business documents.
+Run migrations from `services/api` against Neon using an authorized machine or CI job with the same `DATABASE_URL` before opening the application:
 
-Vercel Hobby is restricted to personal, non-commercial use. A Vercel Pro trial could host the frontend with an external rewrite to a public Railway API, but that adds a public API endpoint and a second provider to configure. Use the Railway setup above for the initial trial. Revisit hosting after verification, security, backup, and cost checks.
+```powershell
+python -m alembic upgrade head
+python -m alembic current
+```
+
+The migrations preserve old transaction rows and agreement version text. They do not copy data from local SQLite to Neon. If historical local data must appear publicly, transfer it before cutover and verify row counts, agreement hashes, and a historical document.
+
+## Optional provider credentials
+
+Set these only in the backend environment after the accounts and test assets exist:
+
+```text
+BREVO_API_KEY=...
+BREVO_SENDER_EMAIL=verified-sender@example.com
+BREVO_SENDER_NAME=MyBizVault
+BREVO_WEBHOOK_TOKEN=long-random-secret
+AT_API_KEY=...
+AT_USERNAME=sandbox
+AT_SANDBOX=true
+AT_WEBHOOK_TOKEN=long-random-secret
+USSD_CALLBACK_TOKEN=long-random-secret
+WHATSAPP_ACCESS_TOKEN=...
+WHATSAPP_PHONE_NUMBER_ID=...
+WHATSAPP_TEST_MODE=true
+META_APP_SECRET=...
+META_VERIFY_TOKEN=long-random-secret
+```
+
+The owner only endpoint `/api/businesses/{business_id}/delivery/provider-tests` probes Brevo, Africa's Talking, and Meta credentials without sending messages. Status webhook endpoints are `/api/webhooks/brevo`, `/api/webhooks/africas-talking?token=AT_WEBHOOK_TOKEN`, and `/api/webhooks/meta`. Configure Brevo authorization as `Bearer BREVO_WEBHOOK_TOKEN`; Meta must sign requests with the app secret. The Africa's Talking sandbox USSD callback URL is `/api/ussd/callback?token=USSD_CALLBACK_TOKEN`. Protect the callback token in URLs and logs. Test with fictional customers in the sandbox simulator.
+
+## Public verification
+
+1. Check `https://YOUR-VERCEL-DOMAIN/api/health` returns a connected database.
+2. Register a fictional owner and create fictional fully paid, unpaid, and partially paid transactions. Open their historical detail pages and PDF documents.
+3. Record another payment. Check its new receipt and unchanged agreement version and original deadline.
+4. Create a review link and verify a correction or rejection against the displayed version, plus duplicate response protection. With email or SMS configured, explicitly request a code and accept a fresh fictional agreement.
+5. Upload, preview, and download a small fictional Vault file; check cross business access and sign out.
+
+Do not declare deployment complete until these checks pass on the public URL. Creating a transaction or opening a review page sends no communication.

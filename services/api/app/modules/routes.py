@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session as DbSession
 from app.db.models import Business, Membership, User
 from app.db.session import get_db
 from app.core.delivery import capabilities
-from app.modules import auth, records
+from app.modules import auth, records, receipts
 from app.modules.business import (require_create_transactions, require_customers,
                                   require_manage_customers, require_owner,
                                   require_view_transactions)
@@ -47,7 +47,7 @@ def rename_business(business_id: str, payload: BusinessUpdateIn,
                     _owner: Membership = Depends(require_owner),
                     _actor: tuple[User, object] = Depends(auth.csrf_session),
                     db: DbSession = Depends(get_db)):
-    return records.update_business(db, business_id, payload.name)
+    return records.update_business(db, business_id, payload)
 
 
 @router.get("/businesses/{business_id}/staff")
@@ -81,7 +81,7 @@ def customer_list(business_id: str, _membership: Membership = Depends(require_cu
 
 @router.post("/businesses/{business_id}/customers", status_code=201)
 def customer_create(business_id: str, payload: CounterpartyIn,
-                    _membership: Membership = Depends(require_manage_customers),
+                    _membership: Membership = Depends(require_customers),
                     _actor: tuple[User, object] = Depends(auth.csrf_session),
                     db: DbSession = Depends(get_db)):
     return records.create_customer(db, business_id, payload)
@@ -114,3 +114,15 @@ def transaction_detail(business_id: str, transaction_id: str,
                        _membership: Membership = Depends(require_view_transactions),
                        db: DbSession = Depends(get_db)):
     return records.get_transaction(db, business_id, transaction_id)
+
+
+@router.get("/businesses/{business_id}/transactions/{transaction_id}/receipts/{receipt_id}/pdf")
+def receipt_pdf(business_id: str, transaction_id: str, receipt_id: str,
+                download: bool = False,
+                _membership: Membership = Depends(require_view_transactions),
+                db: DbSession = Depends(get_db)):
+    receipt = receipts.require_receipt(db, business_id, transaction_id, receipt_id)
+    disposition = "attachment" if download else "inline"
+    return Response(receipts.pdf(receipt), media_type="application/pdf",
+        headers={"Cache-Control": "private, no-store",
+                 "Content-Disposition": f'{disposition}; filename="receipt-{receipt.id}.pdf"'})

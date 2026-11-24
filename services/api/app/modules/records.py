@@ -1,10 +1,12 @@
+import json
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.security import hash_password, utc_iso
-from app.db.models import Business, Counterparty, Membership, Transaction, User
+from app.db.models import Agreement, Business, Counterparty, Membership, Transaction, User
 from app.modules.schemas import CounterpartyIn, StaffCreateIn, StaffUpdateIn, TransactionIn
 
 
@@ -18,8 +20,12 @@ def customer_data(customer: Counterparty, include_contact: bool = True) -> dict:
 def transaction_data(db: DbSession, transaction: Transaction, customer: Counterparty) -> dict:
     from app.modules.obligations import transaction_totals
     totals = transaction_totals(db, transaction)
+    lines = json.loads(transaction.line_items_json) if transaction.line_items_json else [
+        {"description": transaction.description, "quantity": 1,
+         "unit_price_ugx": transaction.total_ugx}]
     return {"id": transaction.id, "counterparty_id": transaction.counterparty_id,
             "counterparty_name": customer.display_name, "description": transaction.description,
+            "line_items": lines,
             "transaction_date": transaction.transaction_date, "total_ugx": transaction.total_ugx,
             "paid_ugx": transaction.paid_ugx, **totals,
             "due_date": transaction.due_date, "delivery_notes": transaction.delivery_notes,
@@ -71,10 +77,24 @@ def get_transaction(db: DbSession, business_id: str, transaction_id: str) -> dic
                             Counterparty.business_id == business_id)).first()
     if not row:
         raise HTTPException(404, "Transaction not found")
-    return transaction_data(db, *row)
+    transaction, customer = row
+    from app.modules import communications, obligations, receipts
+    receipts.ensure_for_transaction(db, transaction)
+    agreement = db.scalar(select(Agreement).where(Agreement.business_id == business_id,
+        Agreement.transaction_id == transaction_id))
+    return {**transaction_data(db, transaction, customer),
+        "customer_phone": customer.phone, "customer_email": customer.email,
+        "receipts": receipts.list_for_transaction(db, business_id, transaction_id),
+        "payments": obligations.list_payments(db, business_id, transaction_id),
+        "approval_history": obligations.list_history(db, business_id, transaction_id),
+        "communications": communications.list_for_transaction(db, business_id, transaction_id),
+        "agreement": {"id": agreement.id, "status": agreement.status,
+            "current_version": agreement.current_version} if agreement else None}
 
 
 def create_transaction(db: DbSession, business_id: str, user_id: str, payload: TransactionIn) -> dict:
+    lines_json = (json.dumps([line.model_dump() for line in payload.line_items],
+                sort_keys=True, separators=(",", ":")) if payload.line_items else None)
     def existing_request() -> Transaction | None:
         if not payload.client_request_id:
             return None
@@ -84,6 +104,7 @@ def create_transaction(db: DbSession, business_id: str, user_id: str, payload: T
     def checked_previous(previous: Transaction) -> dict:
         if (previous.counterparty_id != payload.counterparty_id or
             previous.description != payload.description.strip() or
+            previous.line_items_json != lines_json or
             previous.transaction_date != payload.transaction_date or
             previous.total_ugx != payload.total_ugx or previous.paid_ugx != payload.paid_ugx or
             previous.due_date != payload.due_date or
@@ -102,11 +123,18 @@ def create_transaction(db: DbSession, business_id: str, user_id: str, payload: T
     transaction = Transaction(business_id=business_id, counterparty_id=customer.id,
                               created_by_user_id=user_id, client_request_id=str(payload.client_request_id) if payload.client_request_id else None,
                               description=payload.description.strip(),
+                              line_items_json=lines_json,
                               transaction_date=payload.transaction_date, total_ugx=payload.total_ugx,
                               paid_ugx=payload.paid_ugx, due_date=payload.due_date,
                               delivery_notes=payload.delivery_notes.strip() if payload.delivery_notes else None)
     db.add(transaction)
     try:
+        db.flush()
+        from app.modules import receipts
+        receipts.create_initial(db, transaction)
+        if transaction.paid_ugx < transaction.total_ugx:
+            from app.modules import agreements
+            agreements.stage_draft(db, transaction, db.get(Business, business_id), customer, user_id)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -179,8 +207,13 @@ def update_staff(db: DbSession, business_id: str, staff_id: str, payload: StaffU
     return staff_data(db, membership)
 
 
-def update_business(db: DbSession, business_id: str, name: str) -> dict:
+def update_business(db: DbSession, business_id: str, payload) -> dict:
     business = db.get(Business, business_id)
-    business.name = name.strip()
+    business.name = payload.name.strip()
+    if "phone" in payload.model_fields_set:
+        business.phone = payload.phone.strip() if payload.phone else None
+    if "email" in payload.model_fields_set:
+        business.email = str(payload.email).lower() if payload.email else None
     db.commit()
-    return {"id": business.id, "name": business.name}
+    return {"id": business.id, "name": business.name,
+            "phone": business.phone, "email": business.email}

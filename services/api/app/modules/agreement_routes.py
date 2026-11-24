@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.db.models import Membership, User
 from app.db.session import get_db
-from app.modules import agreements, auth
+from app.modules import agreements, auth, receipts
 from app.modules.business import require_manage_agreements
 from app.modules.schemas import (AgreementAcceptIn, AgreementCreateIn, AgreementDraftIn,
                                  ExternalResponseIn, SendInvitationIn)
@@ -30,6 +30,28 @@ def agreement_detail(business_id: str, agreement_id: str,
                      _membership: Membership = Depends(require_manage_agreements),
                      db: DbSession = Depends(get_db)):
     return agreements.detail(db, business_id, agreement_id)
+
+
+@router.get("/businesses/{business_id}/agreements/{agreement_id}/pdf")
+def agreement_pdf(business_id: str, agreement_id: str, version: int | None = None,
+                  download: bool = False,
+                  _membership: Membership = Depends(require_manage_agreements),
+                  db: DbSession = Depends(get_db)):
+    from fastapi import HTTPException
+    from sqlalchemy import select
+    from app.db.models import AgreementVersion
+    agreement = agreements.require_agreement(db, business_id, agreement_id)
+    number = version if version is not None else agreement.current_version
+    entry = db.scalar(select(AgreementVersion).where(
+        AgreementVersion.agreement_id == agreement.id, AgreementVersion.version == number))
+    if entry is None:
+        raise HTTPException(404, "Agreement version not found")
+    if agreements.content_digest(entry.content) != entry.content_sha256:
+        raise HTTPException(409, "Agreement version integrity check failed")
+    disposition = "attachment" if download else "inline"
+    return Response(receipts.agreement_pdf(entry.content, agreement.id, entry.version),
+        media_type="application/pdf", headers={"Cache-Control": "private, no-store",
+        "Content-Disposition": f'{disposition}; filename="agreement-{agreement.id}-v{entry.version}.pdf"'})
 
 
 @router.put("/businesses/{business_id}/agreements/{agreement_id}/draft")

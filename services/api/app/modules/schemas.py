@@ -23,6 +23,8 @@ class LoginIn(BaseModel):
 
 class BusinessUpdateIn(BaseModel):
     name: str = Field(min_length=2, max_length=160)
+    phone: str | None = Field(default=None, max_length=32)
+    email: EmailStr | None = None
 
     @field_validator("name", mode="before")
     @classmethod
@@ -77,10 +79,22 @@ class CounterpartyIn(BaseModel):
         return self
 
 
+class TransactionLineIn(BaseModel):
+    description: str = Field(min_length=2, max_length=180)
+    quantity: int = Field(gt=0, le=100_000)
+    unit_price_ugx: int = Field(gt=0, le=1_000_000_000_000)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def trim_description(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+
 class TransactionIn(BaseModel):
     counterparty_id: str
     client_request_id: UUID | None = None
     description: str = Field(min_length=3, max_length=500)
+    line_items: list[TransactionLineIn] = Field(default_factory=list, max_length=30)
     transaction_date: date
     total_ugx: int = Field(gt=0, le=1_000_000_000_000)
     paid_ugx: int = Field(ge=0, le=1_000_000_000_000)
@@ -100,6 +114,8 @@ class TransactionIn(BaseModel):
             raise ValueError("A payment deadline is required when a balance remains")
         if self.due_date and self.due_date < self.transaction_date:
             raise ValueError("Payment deadline cannot precede transaction date")
+        if self.line_items and sum(item.quantity * item.unit_price_ugx for item in self.line_items) != self.total_ugx:
+            raise ValueError("Itemized amounts must equal the transaction total")
         return self
 
 
@@ -163,4 +179,4 @@ class ExternalProposalResponseIn(BaseModel):
 
 
 class SendInvitationIn(BaseModel):
-    channel: Literal["email", "sms"]
+    channel: Literal["email", "sms", "whatsapp"]

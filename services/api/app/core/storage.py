@@ -73,9 +73,48 @@ class S3Storage:
         self.client.delete_object(Bucket=self.bucket, Key=key)
 
 
+class DatabaseStorage:
+    """Store private demo-scale files in PostgreSQL, independent of function disk."""
+    def __init__(self, database_engine=None):
+        from app.db.session import engine
+        self.engine = database_engine or engine
+
+    def put(self, key: str, data: bytes, content_type: str) -> None:
+        from sqlalchemy.orm import Session
+        from app.db.models import StoredObject
+        safe_key(key)
+        with Session(self.engine) as db:
+            db.add(StoredObject(key=key, data=data, content_type=content_type))
+            db.commit()
+
+    def get(self, key: str) -> bytes:
+        from sqlalchemy.orm import Session
+        from app.db.models import StoredObject
+        safe_key(key)
+        with Session(self.engine) as db:
+            item = db.get(StoredObject, key)
+            if item is None:
+                raise FileNotFoundError(key)
+            return item.data
+
+    def delete(self, key: str) -> None:
+        from sqlalchemy.orm import Session
+        from app.db.models import StoredObject
+        safe_key(key)
+        with Session(self.engine) as db:
+            item = db.get(StoredObject, key)
+            if item:
+                db.delete(item)
+                db.commit()
+
+
 def get_storage() -> ObjectStorage:
     if settings.storage_backend == "local":
+        if os.getenv("VERCEL"):
+            raise RuntimeError("Use database or S3 storage on Vercel; local function disk is temporary")
         return LocalStorage(settings.storage_local_path)
+    if settings.storage_backend == "database":
+        return DatabaseStorage()
     if not settings.s3_bucket:
         raise RuntimeError("S3_BUCKET is required for S3 storage")
     return S3Storage(settings.s3_bucket, settings.s3_endpoint_url, settings.s3_region)

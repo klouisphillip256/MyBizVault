@@ -57,8 +57,11 @@ def test_acceptance_preserves_exact_version_and_link_access(clients, monkeypatch
     first = agreement["versions"][0]
     assert "UGX 300,000" in first["content"]
     assert first["content_sha256"] == sha256(first["content"].encode()).hexdigest()
-    assert owner.post(f"/api/businesses/{business_id}/agreements", headers=csrf(owner),
-                      json={"transaction_id": agreement["transaction_id"]}).status_code == 409
+    duplicate = owner.post(f"/api/businesses/{business_id}/agreements", headers=csrf(owner),
+                           json={"transaction_id": agreement["transaction_id"]})
+    assert duplicate.status_code == 201
+    assert duplicate.json()["id"] == agreement_id
+    assert duplicate.json()["current_version"] == 1
     assert other.get(f"/api/businesses/{business_id}/agreements/{agreement_id}").status_code == 404
     assert other.get(f"/api/businesses/{other_id}/agreements/{agreement_id}").status_code == 404
     header = invite(owner, business_id, agreement_id)

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import secrets
 from datetime import timedelta
 
@@ -8,12 +9,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session as DbSession
 
 from app.core.config import settings
-from app.core.delivery import check_delivery, send_message
+from app.core.delivery import capabilities, check_delivery, send_message
 from app.core.security import as_utc, digest, hash_password, utc_iso, verify_password
 from app.db.models import (Agreement, AgreementInvitation, AgreementVersion, AuditEvent,
                            Business, ConfirmationChallenge, ConfirmationEvent, Counterparty,
                            Transaction, utcnow)
-from app.modules import vault
+from app.modules import communications, vault
 
 
 def content_digest(content: str) -> str:
@@ -85,11 +86,21 @@ def detail(db: DbSession, business_id: str, agreement_id: str) -> dict:
 
 def render_credit_sale(business: Business, transaction: Transaction, customer: Counterparty) -> str:
     balance = transaction.total_ugx - transaction.paid_ugx
+    lines = json.loads(transaction.line_items_json) if transaction.line_items_json else [
+        {"description": transaction.description, "quantity": 1, "unit_price_ugx": transaction.total_ugx}]
+    itemized = "".join(
+        f"Item {index}: {item['description']}; quantity {item['quantity']}; unit price UGX {item['unit_price_ugx']:,}; line total UGX {item['quantity'] * item['unit_price_ugx']:,}\n"
+        for index, item in enumerate(lines, 1))
     return ("CREDIT SALE AGREEMENT — DRAFT\n\n"
             f"Business: {business.name}\n"
+            f"Business telephone: {business.phone or 'Not recorded'}\n"
+            f"Business email: {business.email or 'Not recorded'}\n"
             f"Customer: {customer.display_name}\n"
+            f"Customer telephone: {customer.phone or 'Not recorded'}\n"
+            f"Customer email: {customer.email or 'Not recorded'}\n"
             f"Transaction date: {transaction.transaction_date.isoformat()}\n"
             f"Goods or services supplied: {transaction.description}\n"
+            f"{itemized}"
             f"Total value: UGX {transaction.total_ugx:,}\n"
             f"Amount reported as paid: UGX {transaction.paid_ugx:,}\n"
             f"Outstanding balance: UGX {balance:,}\n"
@@ -99,7 +110,8 @@ def render_credit_sale(business: Business, transaction: Transaction, customer: C
             "1. The business records the goods or services above as supplied under this transaction.\n"
             f"2. The customer agrees to pay the outstanding UGX {balance:,} by {transaction.due_date.isoformat()}.\n"
             "3. Any correction or change to these terms should be documented as a new agreement version.\n\n"
-            "The amount marked paid is a business report and has not been independently verified by MyBizVault.")
+            "The amount marked paid is a business report and has not been independently verified by MyBizVault.\n"
+            "Commercial context: This record concerns a transaction in Uganda. The Sale of Goods and Supply of Services Act 2017, Electronic Transactions Act 2011 and Electronic Signatures Act 2011 may be relevant according to the facts. Electronic acceptance is logged against a specific version, but identity and legal effect require separate assessment under applicable law.")
 
 
 def create_draft(db: DbSession, business_id: str, transaction_id: str, user_id: str) -> dict:
@@ -109,28 +121,36 @@ def create_draft(db: DbSession, business_id: str, transaction_id: str, user_id: 
         raise HTTPException(404, "Transaction not found")
     if transaction.paid_ugx >= transaction.total_ugx or transaction.due_date is None:
         raise HTTPException(422, "Phase 3 supports credit transactions with a balance and deadline")
-    if db.scalar(select(Agreement.id).where(Agreement.transaction_id == transaction_id)):
-        raise HTTPException(409, "This transaction already has an agreement")
+    existing = db.scalar(select(Agreement).where(Agreement.transaction_id == transaction_id))
+    if existing:
+        return detail(db, business_id, existing.id)
     business = db.get(Business, business_id)
     customer = db.get(Counterparty, transaction.counterparty_id)
     if customer is None or customer.business_id != business_id:
         raise HTTPException(409, "Transaction customer is unavailable")
-    content = render_credit_sale(business, transaction, customer)
-    agreement = Agreement(business_id=business_id, transaction_id=transaction_id,
-                          status="draft", current_version=1)
+    agreement = stage_draft(db, transaction, business, customer, user_id)
     try:
-        db.add(agreement)
-        db.flush()
-        version = AgreementVersion(agreement_id=agreement.id, version=1, content=content,
-                                   content_sha256=content_digest(content), created_by_user_id=user_id)
-        db.add(version)
-        db.flush()
-        audit(db, agreement, "draft_created", version.id, user_id)
         db.commit()
     except IntegrityError:
         db.rollback()
         raise HTTPException(409, "This transaction already has an agreement") from None
     return detail(db, business_id, agreement.id)
+
+
+def stage_draft(db: DbSession, transaction: Transaction, business: Business,
+                customer: Counterparty, user_id: str) -> Agreement:
+    """Add the first immutable version to the caller's transaction."""
+    content = render_credit_sale(business, transaction, customer)
+    agreement = Agreement(business_id=transaction.business_id, transaction_id=transaction.id,
+                          status="draft", current_version=1)
+    db.add(agreement)
+    db.flush()
+    version = AgreementVersion(agreement_id=agreement.id, version=1, content=content,
+                               content_sha256=content_digest(content), created_by_user_id=user_id)
+    db.add(version)
+    db.flush()
+    audit(db, agreement, "draft_created", version.id, user_id)
+    return agreement
 
 
 def revise_draft(db: DbSession, business_id: str, agreement_id: str, user_id: str, content: str) -> dict:
@@ -188,7 +208,7 @@ def create_invitation(db: DbSession, business_id: str, agreement_id: str, user_i
     db.commit()
     return {"review_url": f"{settings.frontend_origin.rstrip('/')}/review/invite#token={token}",
             "expires_at": utc_iso(invitation.expires_at), "version_id": version.id,
-            "delivery": "manual", "identity_verified": False}
+            "invitation_id": invitation.id, "delivery": "manual", "identity_verified": False}
 
 
 def send_invitation(db: DbSession, business_id: str, agreement_id: str,
@@ -200,17 +220,20 @@ def send_invitation(db: DbSession, business_id: str, agreement_id: str,
     recipient = customer.email if channel == "email" else customer.phone
     check_delivery(channel, recipient)
     result = create_invitation(db, business_id, agreement_id, user_id)
+    attempt = communications.start(db, business_id, transaction.id, agreement.id, None, channel, recipient)
     try:
-        send_message(channel, recipient, f"Review an agreement from {business.name}",
+        delivery = send_message(channel, recipient, f"Review an agreement from {business.name}",
             f"{business.name} invites you to review an agreement. Open this private link:\n{result['review_url']}\n\nThe link expires in seven days. Do not forward it.")
     except HTTPException as failure:
+        communications.fail(db, attempt, str(failure.detail))
         audit(db, agreement, "invitation_delivery_failed", result["version_id"], user_id,
               f"{channel} delivery failed")
         db.commit()
-        return {**result, "delivery": "failed", "delivery_error": failure.detail}
+        return {**result, "delivery": "failed", "delivery_status": "failed", "delivery_error": failure.detail}
+    communications.finish(db, attempt, delivery)
     audit(db, agreement, "invitation_sent", result["version_id"], user_id, f"Channel: {channel}")
     db.commit()
-    return {**result, "delivery": channel}
+    return {**result, "delivery": channel, "delivery_status": attempt.status}
 
 
 def invitation_for_token(db: DbSession, token: str | None, allow_completed: bool = False) -> tuple[AgreementInvitation, Agreement, AgreementVersion]:
@@ -247,13 +270,21 @@ def external_review(db: DbSession, token: str | None) -> dict:
             "total_ugx": transaction.total_ugx, "paid_ugx": transaction.paid_ugx,
             "balance_ugx": transaction.total_ugx - transaction.paid_ugx,
             "due_date": transaction.due_date, "development_verification": settings.development_verification,
+            "verification_delivery_available": bool((customer.phone and capabilities()["sms"]) or
+                (customer.email and capabilities()["email"])),
             "identity_verified": False, "expires_at": utc_iso(invitation.expires_at)}
 
 
 def issue_challenge(db: DbSession, token: str | None) -> dict:
-    if not settings.development_verification:
-        raise HTTPException(503, "Independent verification delivery is not configured")
     invitation, agreement, version = invitation_for_token(db, token)
+    transaction = db.get(Transaction, agreement.transaction_id)
+    customer = db.get(Counterparty, invitation.counterparty_id)
+    available = capabilities()
+    channel = "development" if settings.development_verification else (
+        "sms" if customer.phone and available["sms"] else
+        "email" if customer.email and available["email"] else None)
+    if channel is None:
+        raise HTTPException(503, "Verification code delivery is not configured for this customer")
     now = utcnow()
     cutoff = now - timedelta(seconds=60)
     result = db.execute(update(AgreementInvitation).where(
@@ -271,25 +302,42 @@ def issue_challenge(db: DbSession, token: str | None) -> dict:
         old.consumed_at = now
     code = f"{secrets.randbelow(1_000_000):06d}"
     challenge = ConfirmationChallenge(invitation_id=invitation.id,
-                                      code_hash=hash_password(code), attempts=0,
+                                      code_hash=hash_password(code), delivery_channel=channel, attempts=0,
                                       expires_at=now + timedelta(minutes=5))
     db.add(challenge)
-    audit(db, agreement, "development_code_issued", version.id,
-          detail="Code displayed to link holder; identity not verified")
+    audit(db, agreement, "acceptance_code_requested", version.id,
+          detail=f"Channel: {channel}; legal identity not verified")
     db.commit()
-    return {"development_code": code, "expires_at": utc_iso(challenge.expires_at),
-            "warning": "Development-only code displayed to the link holder. This does not verify identity."}
+    if channel == "development":
+        return {"development_code": code, "expires_at": utc_iso(challenge.expires_at),
+                "delivery": "development", "delivery_status": "simulated",
+                "warning": "Development-only code displayed to the link holder. This does not verify identity."}
+    recipient = customer.phone if channel == "sms" else customer.email
+    attempt = communications.start(db, agreement.business_id, transaction.id, agreement.id,
+                                   None, channel, recipient)
+    try:
+        result = send_message(channel, recipient, "MyBizVault agreement acceptance code",
+            f"Your MyBizVault code for agreement version {version.version} is {code}. It expires in 5 minutes. Do not share it.")
+    except HTTPException:
+        challenge.consumed_at = utcnow()
+        db.commit()
+        communications.fail(db, attempt, "Acceptance code submission failed")
+        raise HTTPException(503, "Verification code submission failed; try again later") from None
+    communications.finish(db, attempt, result)
+    return {"expires_at": utc_iso(challenge.expires_at), "delivery": channel,
+            "delivery_status": attempt.status,
+            "warning": "A provider accepted the code request; delivery and legal identity are not guaranteed."}
 
 
 def accept(db: DbSession, token: str | None, version_id: str, code: str, explicitly_accepted: bool) -> dict:
-    if not settings.development_verification:
-        raise HTTPException(503, "Independent verification delivery is not configured")
     invitation, agreement, version = invitation_for_token(db, token)
     if not explicitly_accepted or version.id != version_id:
         raise HTTPException(409, "Displayed agreement version must be explicitly accepted")
     challenge = db.scalar(select(ConfirmationChallenge).where(
         ConfirmationChallenge.invitation_id == invitation.id).order_by(ConfirmationChallenge.created_at.desc()))
-    if challenge is None or challenge.consumed_at is not None or as_utc(challenge.expires_at) <= utcnow() or challenge.attempts >= 5:
+    if (challenge is None or challenge.consumed_at is not None or
+            as_utc(challenge.expires_at) <= utcnow() or challenge.attempts >= 5 or
+            (challenge.delivery_channel is None and not settings.development_verification)):
         raise HTTPException(429, "Verification code unavailable or expired")
     if not verify_password(code, challenge.code_hash):
         db.execute(update(ConfirmationChallenge).where(
@@ -312,10 +360,12 @@ def accept(db: DbSession, token: str | None, version_id: str, code: str, explici
         raise HTTPException(409, "Agreement is no longer available for confirmation")
     invitation.completed_at = now
     db.add(ConfirmationEvent(agreement_id=agreement.id, agreement_version_id=version.id,
-                             invitation_id=invitation.id, action="accepted",
-                             verification_method="development_code", note=None))
-    audit(db, agreement, "accepted_with_development_code", version.id,
-          detail="No independent identity proof")
+                             invitation_id=invitation.id, counterparty_id=invitation.counterparty_id,
+                             action="accepted",
+                             verification_method=(challenge.delivery_channel or "development") + "_code",
+                             note="Code possession observed; legal identity not independently verified"))
+    audit(db, agreement, "accepted_with_code", version.id,
+          detail=f"Code channel: {challenge.delivery_channel}; legal identity not independently verified")
     key = None
     provider = None
     try:
@@ -351,7 +401,8 @@ def respond(db: DbSession, token: str | None, version_id: str, action: str, note
         raise HTTPException(409, "Agreement is no longer available for response")
     invitation.revoked_at = now
     db.add(ConfirmationEvent(agreement_id=agreement.id, agreement_version_id=version.id,
-                             invitation_id=invitation.id, action=action,
+                             invitation_id=invitation.id, counterparty_id=invitation.counterparty_id,
+                             action=action,
                              verification_method="invitation_link_only", note=note))
     audit(db, agreement, action, version.id, detail="Response from invitation link; identity not verified")
     db.commit()

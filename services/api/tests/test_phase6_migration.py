@@ -13,8 +13,9 @@ def test_phase6_upgrade_and_rollback_preserve_older_records(tmp_path):
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{database.as_posix()}"}
 
     def migrate(direction, target):
-        subprocess.run([sys.executable, "-m", "alembic", direction, target],
-                       cwd=api_dir, env=env, check=True, capture_output=True, text=True)
+        result = subprocess.run([sys.executable, "-m", "alembic", direction, target],
+                                cwd=api_dir, env=env, capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
 
     migrate("upgrade", "0005_obligations_negotiation")
     with sqlite3.connect(database) as db:
@@ -33,7 +34,7 @@ def test_phase6_upgrade_and_rollback_preserve_older_records(tmp_path):
         assert db.execute("SELECT total_ugx FROM transactions WHERE id='sale'").fetchone()[0] == 1000
         assert db.execute("SELECT transaction_id FROM agreements WHERE id='agreement'").fetchone()[0] == "sale"
         assert db.execute("SELECT client_request_id FROM transactions WHERE id='sale'").fetchone()[0] is None
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0007_proposal_invitations"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0014_unique_initial_receipts"
     migrate("downgrade", "0005_obligations_negotiation")
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT total_ugx FROM transactions WHERE id='sale'").fetchone()[0] == 1000
