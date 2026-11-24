@@ -1,0 +1,91 @@
+from fastapi import APIRouter, Depends, Header, Response
+from sqlalchemy.orm import Session as DbSession
+
+from app.db.models import Membership, User
+from app.db.session import get_db
+from app.modules import agreements, auth
+from app.modules.business import require_manage_agreements
+from app.modules.schemas import (AgreementAcceptIn, AgreementCreateIn, AgreementDraftIn,
+                                 ExternalResponseIn, SendInvitationIn)
+
+router = APIRouter(prefix="/api")
+
+
+@router.get("/businesses/{business_id}/agreements")
+def agreement_list(business_id: str, _membership: Membership = Depends(require_manage_agreements),
+                   db: DbSession = Depends(get_db)):
+    return agreements.list_agreements(db, business_id)
+
+
+@router.post("/businesses/{business_id}/agreements", status_code=201)
+def agreement_create(business_id: str, payload: AgreementCreateIn,
+                     _membership: Membership = Depends(require_manage_agreements),
+                     actor: tuple[User, object] = Depends(auth.csrf_session),
+                     db: DbSession = Depends(get_db)):
+    return agreements.create_draft(db, business_id, payload.transaction_id, actor[0].id)
+
+
+@router.get("/businesses/{business_id}/agreements/{agreement_id}")
+def agreement_detail(business_id: str, agreement_id: str,
+                     _membership: Membership = Depends(require_manage_agreements),
+                     db: DbSession = Depends(get_db)):
+    return agreements.detail(db, business_id, agreement_id)
+
+
+@router.put("/businesses/{business_id}/agreements/{agreement_id}/draft")
+def agreement_revise(business_id: str, agreement_id: str, payload: AgreementDraftIn,
+                     _membership: Membership = Depends(require_manage_agreements),
+                     actor: tuple[User, object] = Depends(auth.csrf_session),
+                     db: DbSession = Depends(get_db)):
+    return agreements.revise_draft(db, business_id, agreement_id, actor[0].id, payload.content)
+
+
+@router.post("/businesses/{business_id}/agreements/{agreement_id}/invitation")
+def agreement_invite(business_id: str, agreement_id: str,
+                     _membership: Membership = Depends(require_manage_agreements),
+                     actor: tuple[User, object] = Depends(auth.csrf_session),
+                     db: DbSession = Depends(get_db)):
+    return agreements.create_invitation(db, business_id, agreement_id, actor[0].id)
+
+
+@router.post("/businesses/{business_id}/agreements/{agreement_id}/invitation/send")
+def agreement_send(business_id: str, agreement_id: str, payload: SendInvitationIn,
+                   _membership: Membership = Depends(require_manage_agreements),
+                   actor: tuple[User, object] = Depends(auth.csrf_session),
+                   db: DbSession = Depends(get_db)):
+    return agreements.send_invitation(db, business_id, agreement_id, actor[0].id, payload.channel)
+
+
+def private_response(response: Response) -> None:
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Referrer-Policy"] = "no-referrer"
+
+
+@router.get("/external/review")
+def external_review(response: Response, token: str | None = Header(None, alias="X-Invitation-Token"),
+                    db: DbSession = Depends(get_db)):
+    private_response(response)
+    return agreements.external_review(db, token)
+
+
+@router.post("/external/challenge")
+def external_challenge(response: Response, token: str | None = Header(None, alias="X-Invitation-Token"),
+                       db: DbSession = Depends(get_db)):
+    private_response(response)
+    return agreements.issue_challenge(db, token)
+
+
+@router.post("/external/accept")
+def external_accept(payload: AgreementAcceptIn, response: Response,
+                    token: str | None = Header(None, alias="X-Invitation-Token"),
+                    db: DbSession = Depends(get_db)):
+    private_response(response)
+    return agreements.accept(db, token, payload.version_id, payload.code, payload.explicitly_accepted)
+
+
+@router.post("/external/respond")
+def external_respond(payload: ExternalResponseIn, response: Response,
+                     token: str | None = Header(None, alias="X-Invitation-Token"),
+                     db: DbSession = Depends(get_db)):
+    private_response(response)
+    return agreements.respond(db, token, payload.version_id, payload.action, payload.note)

@@ -1,0 +1,14 @@
+.git
+.venv
+node_modules
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+*.db
+*.db-*
+*.sqlite3
+*.sqlite3-*
+**/vault_objects
+**/.env
+**/.env.*
