@@ -90,6 +90,20 @@ def external_review(response: Response, token: str | None = Header(None, alias="
     return agreements.external_review(db, token)
 
 
+@router.get("/external/pdf")
+def external_agreement_pdf(token: str | None = Header(None, alias="X-Invitation-Token"),
+                           db: DbSession = Depends(get_db)):
+    _invitation, agreement, version = agreements.invitation_for_token(db, token, allow_completed=True)
+    # Apply the same customer and business checks as the text review.
+    agreements.external_review(db, token)
+    pdf_response = Response(receipts.agreement_pdf(version.content, agreement.id, version.version),
+        media_type="application/pdf", headers={
+            "Content-Disposition": f'inline; filename="agreement-{agreement.id}-v{version.version}.pdf"',
+            "X-Content-Type-Options": "nosniff"})
+    private_response(pdf_response)
+    return pdf_response
+
+
 @router.post("/external/challenge")
 def external_challenge(response: Response, token: str | None = Header(None, alias="X-Invitation-Token"),
                        db: DbSession = Depends(get_db)):

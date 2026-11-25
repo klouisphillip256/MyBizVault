@@ -70,6 +70,12 @@ def test_acceptance_preserves_exact_version_and_link_access(clients, monkeypatch
     assert review.headers["cache-control"] == "no-store"
     assert review.json()["content"] == first["content"]
     assert review.json()["identity_verified"] is False
+    pdf = other.get("/api/external/pdf", headers=header)
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    assert pdf.headers["content-type"] == "application/pdf"
+    assert pdf.headers["cache-control"] == "no-store"
+    assert other.get("/api/external/pdf").status_code == 404
+    assert other.get("/api/external/pdf", headers={"X-Invitation-Token": "invalid"}).status_code == 404
     assert other.get("/api/external/review", headers={"X-Invitation-Token": "invalid"}).status_code == 404
     challenge = other.post("/api/external/challenge", headers=header)
     assert challenge.status_code == 200, challenge.text
@@ -93,6 +99,7 @@ def test_acceptance_preserves_exact_version_and_link_access(clients, monkeypatch
                       json={"version_id": first["id"], "code": code,
                             "explicitly_accepted": True}).status_code == 404
     assert other.get("/api/external/review", headers=header).json()["status"] == "confirmed"
+    assert other.get("/api/external/pdf", headers=header).status_code == 200
     preserved = owner.get(f"/api/businesses/{business_id}/agreements/{agreement_id}").json()
     assert preserved["versions"][0] == first
     assert preserved["events"][0]["action"] == "accepted"
@@ -188,10 +195,12 @@ def test_reissue_expiry_and_disabled_delivery(clients, monkeypatch):
     assert other.post("/api/external/challenge", headers=first).status_code == 503
     second = invite(owner, business_id, agreement["id"])
     assert other.get("/api/external/review", headers=first).status_code == 404
+    assert other.get("/api/external/pdf", headers=first).status_code == 404
     assert other.get("/api/external/review", headers=second).status_code == 200
     current_time = utcnow()
     monkeypatch.setattr(agreements, "utcnow", lambda: current_time + timedelta(days=8))
     assert other.get("/api/external/review", headers=second).status_code == 404
+    assert other.get("/api/external/pdf", headers=second).status_code == 404
 
 
 def test_storage_failure_rolls_back_acceptance(clients, monkeypatch):

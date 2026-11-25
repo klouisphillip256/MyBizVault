@@ -12,7 +12,7 @@ import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams } fro
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import {
-  apiError, createCustomer, createStaff, createTransaction, getAgreement, getAgreementPdf, getAgreements, getCustomers, getHealth,
+  apiError, createCustomer, createInvitation, createStaff, createTransaction, getAgreement, getAgreementPdf, getAgreements, getCustomers, getHealth,
   getMe, getReceiptPdf, getStaff, getTransaction, getTransactions, login, logout, registerOwner, updateBusiness, updateCustomer, updateStaff,
 } from '../lib/api'
 import { ugx } from '../lib/utils'
@@ -115,13 +115,18 @@ function TransactionsPage({ membership }: { membership: Membership }) {
 
 function TransactionDetailPage({ membership }: { membership: Membership }) {
   const { transactionId = '' } = useParams()
+  const queryClient = useQueryClient()
   const [preview, setPreview] = useState<string | null>(null)
   const [pdfError, setPdfError] = useState<unknown>(null)
+  const [approvalLink, setApprovalLink] = useState('')
+  const [shareStatus, setShareStatus] = useState('')
+  const [sharing, setSharing] = useState(false)
   const { data, isPending, error } = useQuery({ queryKey: ['transaction', membership.business_id, transactionId],
-    queryFn: () => getTransaction(membership.business_id, transactionId), enabled: membership.can_view_transactions && !!transactionId })
+    queryFn: () => getTransaction(membership.business_id, transactionId), enabled: membership.can_view_transactions && !!transactionId,
+    refetchInterval: 15000 })
   const { data: agreement } = useQuery({ queryKey: ['agreement', membership.business_id, data?.agreement?.id],
     queryFn: () => getAgreement(membership.business_id, data!.agreement!.id),
-    enabled: membership.can_manage_agreements && !!data?.agreement })
+    enabled: membership.can_manage_agreements && !!data?.agreement, refetchInterval: 15000 })
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   const openPdf = async (kind: 'receipt' | 'agreement', id: string, mode: 'preview' | 'download' | 'share', version?: number) => {
     setPdfError(null)
@@ -139,12 +144,33 @@ function TransactionDetailPage({ membership }: { membership: Membership }) {
       else { const link = document.createElement('a'); link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 60000) }
     } catch (failure) { setPdfError(failure) }
   }
+  const shareAgreementForApproval = async (agreementId: string) => {
+    setSharing(true); setPdfError(null); setShareStatus('')
+    try {
+      const invitation = await createInvitation(membership.business_id, agreementId)
+      setApprovalLink(invitation.review_url)
+      await queryClient.invalidateQueries({ queryKey: ['transaction', membership.business_id, transactionId] })
+      await queryClient.invalidateQueries({ queryKey: ['agreement', membership.business_id, agreementId] })
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: 'Review this MyBizVault agreement',
+            text: 'Open the agreement PDF, review the transaction, and explicitly accept or reject the exact version.',
+            url: invitation.review_url })
+          setShareStatus('Share action completed. Customer delivery and approval are not confirmed.')
+        } catch (failure) {
+          setShareStatus(failure instanceof DOMException && failure.name === 'AbortError'
+            ? 'Sharing was cancelled. The review link is ready below.'
+            : 'Could not open the share sheet. Copy the review link below.')
+        }
+      } else setShareStatus('Review link ready. Copy and send it to the intended customer.')
+    } catch (failure) { setPdfError(failure) } finally { setSharing(false) }
+  }
   if (!membership.can_view_transactions) return <EmptyState title="Access not granted" detail="Ask the business owner for transaction access." />
   return <><SectionIntro label="TRANSACTION RECORD" title={data ? data.counterparty_name : 'Transaction'} description="Receipts, obligations and approval history for this sale." action={<Link className="text-link" to="/transactions">All transactions</Link>} />
     {isPending ? <p>Loading transaction…</p> : error ? <ErrorBlock error={error} /> : data && <div className="settings-stack">
       <div className="card module-card"><h2>{data.description}</h2><p>{data.transaction_date} · {ugx(data.total_ugx)} total · {ugx(data.balance_ugx)} outstanding</p><p>Customer: {data.counterparty_name}{data.customer_phone && ` · ${data.customer_phone}`}{data.customer_email && ` · ${data.customer_email}`}</p><p>Original deadline: {data.due_date || 'None'} · Working deadline: {data.effective_due_date || 'None'}</p><p>Delivery: {data.delivery_notes || 'Not recorded'}</p><h3>Items</h3>{data.line_items.map((item, index) => <p key={index}>{item.description} ? {item.quantity} ? {ugx(item.unit_price_ugx)} = {ugx(item.quantity * item.unit_price_ugx)}</p>)}</div>
       <div className="card module-card"><h2>Payment receipts</h2><p className="field-hint">Payment entries are business records. Receipt issue and agreement acceptance have separate statuses.</p>{data.receipts.length ? data.receipts.map(receipt => <div className="module-item" key={receipt.id}><div><strong>{receipt.kind === 'initial' ? 'Initial payment' : 'Later payment'} · {ugx(receipt.amount_ugx)}</strong><small>{receipt.payment_date} · {receipt.payment_status_at_issue.replaceAll('_', ' ')}</small></div><Button variant="outline" size="small" onClick={() => openPdf('receipt', receipt.id, 'preview')}>Preview PDF</Button><Button variant="outline" size="small" onClick={() => openPdf('receipt', receipt.id, 'download')}>Download</Button><Button variant="outline" size="small" onClick={() => openPdf('receipt', receipt.id, 'share')}>Share</Button></div>) : <p>No payment has been recorded, so no receipt is available.</p>}{data.payments.map(payment => <p key={payment.id}>Payment {ugx(payment.amount_ugx)} on {payment.paid_on}: <strong>{payment.status}</strong> (business recorded)</p>)}</div>
-      <div className="card module-card"><h2>Outstanding obligation agreement</h2>{data.agreement ? <><p>Agreement approval: <strong>{data.agreement.status.replaceAll('_', ' ')}</strong> · Version {data.agreement.current_version}</p>{membership.can_manage_agreements && <><Link className="text-link" to={`/agreements?agreement=${data.agreement.id}`}>Open agreement and approval tools</Link><div className="form-actions"><Button variant="outline" onClick={() => openPdf('agreement', data.agreement!.id, 'preview', data.agreement!.current_version)}>Preview PDF</Button><Button variant="outline" onClick={() => openPdf('agreement', data.agreement!.id, 'download', data.agreement!.current_version)}>Download</Button><Button variant="outline" onClick={() => openPdf('agreement', data.agreement!.id, 'share', data.agreement!.current_version)}>Share</Button></div>{agreement?.versions.map(version => <div key={version.id}><span>Version {version.version} · {new Date(version.created_at).toLocaleString()}</span> <Button variant="ghost" size="small" onClick={() => openPdf('agreement', data.agreement!.id, 'preview', version.version)}>Preview</Button></div>)}<h3>Agreement approval history</h3>{agreement?.events.length ? agreement.events.map((event, index) => <p key={index}>{event.action} · {event.verification_method.replaceAll('_', ' ')} · {new Date(event.created_at).toLocaleString()}</p>) : <p>No external response recorded.</p>}</>}</> : <p>No agreement is needed for a fully paid transaction.</p>}</div>
+      <div className="card module-card"><h2>Outstanding obligation agreement</h2>{data.agreement ? <><p>Agreement approval: <strong>{data.agreement.status.replaceAll('_', ' ')}</strong> · Version {data.agreement.current_version}</p>{membership.can_manage_agreements && <><Link className="text-link" to={`/agreements?agreement=${data.agreement.id}`}>Open agreement and approval tools</Link><div className="form-actions"><Button variant="outline" onClick={() => openPdf('agreement', data.agreement!.id, 'preview', data.agreement!.current_version)}>Preview PDF</Button><Button variant="outline" onClick={() => openPdf('agreement', data.agreement!.id, 'download', data.agreement!.current_version)}>Download</Button>{['draft', 'invited'].includes(data.agreement.status) && <Button variant="outline" onClick={() => shareAgreementForApproval(data.agreement!.id)} disabled={sharing}>{sharing ? 'Preparing review link...' : 'Share for customer approval'}</Button>}</div>{agreement?.versions.map(version => <div key={version.id}><span>Version {version.version} · {new Date(version.created_at).toLocaleString()}</span> <Button variant="ghost" size="small" onClick={() => openPdf('agreement', data.agreement!.id, 'preview', version.version)}>Preview</Button></div>)}{approvalLink && <div className="link-panel"><strong>Customer review and PDF link</strong><p>Send this private link to the intended customer. Opening the PDF does not approve it; the customer must explicitly respond. Creating another link will replace this one.</p><input value={approvalLink} readOnly aria-label="Customer approval link" onFocus={event => event.target.select()} /><Button variant="outline" onClick={async () => { try { await navigator.clipboard.writeText(approvalLink); setShareStatus('Link copied. Send it to the customer.') } catch { setShareStatus('Select and copy the link above.') } }}>Copy link</Button>{shareStatus && <p role="status">{shareStatus}</p>}</div>}<h3>Agreement approval history</h3>{agreement?.events.length ? agreement.events.map((event, index) => <p key={index}>{event.action} · {event.verification_method.replaceAll('_', ' ')} · {new Date(event.created_at).toLocaleString()}</p>) : <p>No external response recorded.</p>}</>}</> : <p>No agreement is needed for a fully paid transaction.</p>}</div>
       <div className="card module-card"><h2>Payment and proposal history</h2>{data.approval_history.length ? data.approval_history.map(event => <p key={event.id}>{event.action.replaceAll('_', ' ')} · {new Date(event.created_at).toLocaleString()}{event.note && ` · ${event.note}`}</p>) : <p>No later activity recorded.</p>}</div>
       <div className="card module-card"><h2>Communication log</h2>{data.communications.length ? data.communications.map(item => <p key={item.id}>{item.channel} to {item.recipient_masked}: <strong>{item.status}</strong> via {item.provider} · {new Date(item.updated_at).toLocaleString()}</p>) : <p>No messages have been sent from this transaction.</p>}</div>
       {Boolean(pdfError) && <ErrorBlock error={pdfError} />}{preview && <div className="card module-card"><Button variant="outline" onClick={() => setPreview(null)}>Close PDF preview</Button><iframe title="Document PDF preview" src={preview} style={{ width: '100%', height: '70vh', border: 0 }} /></div>}
