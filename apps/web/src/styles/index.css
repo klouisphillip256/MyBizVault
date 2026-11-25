@@ -99,6 +99,11 @@ body { overflow-x: hidden; }
 .metric-icon.amber, .attention-icon.amber { background: var(--mbv-warning-bg); color: var(--mbv-warning); }
 .metric-card > strong, .transaction-main strong, .transaction-end strong, .attention-item strong, .review-amounts strong { color: var(--mbv-deep); }
 .metric-featured > strong { color: #fff; }
+.dashboard-link { cursor: pointer; transition: box-shadow .15s ease, transform .15s ease; }
+.dashboard-link:hover { box-shadow: 0 5px 14px #35204720; transform: translateY(-1px); }
+.dashboard-link:focus-visible { outline: 3px solid var(--mbv-primary); outline-offset: 3px; }
+.metric-featured.dashboard-link:focus-visible { outline-color: var(--mbv-gold); }
+.attention-item.dashboard-link:hover { background: var(--mbv-surface-soft); }
 .metric-featured .metric-footer a { color: #f6dc88; }
 .more-link { color: var(--mbv-primary); }
 .more-link:hover { background: var(--mbv-surface-soft); border-color: #a990ba; }
