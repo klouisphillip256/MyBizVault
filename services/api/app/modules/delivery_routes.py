@@ -2,8 +2,9 @@
 
 import hashlib
 import hmac
+import json
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DbSession
@@ -19,10 +20,26 @@ router = APIRouter(prefix="/api")
 
 def _probe(url: str, headers: dict[str, str]) -> bool:
     try:
-        with urlopen(Request(url, headers=headers), timeout=8) as response:
+        with urlopen(UrlRequest(url, headers=headers), timeout=8) as response:
             return 200 <= response.status < 300
     except Exception:
         return False
+
+
+def _brevo_sender_status() -> str:
+    if not settings.brevo_api_key or not settings.brevo_sender_email:
+        return "unconfigured"
+    try:
+        with urlopen(UrlRequest("https://api.brevo.com/v3/senders",
+                             headers={"api-key": settings.brevo_api_key}), timeout=8) as response:
+            senders = json.load(response).get("senders", [])
+    except Exception:
+        return "check_failed"
+    sender = next((item for item in senders if
+                   item.get("email", "").casefold() == settings.brevo_sender_email.casefold()), None)
+    if sender is None:
+        return "not_found"
+    return "active" if sender.get("active") is True else "inactive"
 
 
 @router.get("/businesses/{business_id}/delivery/provider-tests")
@@ -33,6 +50,7 @@ def provider_tests(business_id: str, _owner: Membership = Depends(require_owner)
     if settings.brevo_api_key:
         results["brevo"] = "connected" if _probe("https://api.brevo.com/v3/account",
             {"api-key": settings.brevo_api_key}) else "failed"
+    results["brevo_sender"] = _brevo_sender_status()
     if settings.at_api_key and settings.at_username:
         host = "api.sandbox.africastalking.com" if settings.at_sandbox else "api.africastalking.com"
         url = f"https://{host}/version1/user?{urlencode({'username': settings.at_username})}"

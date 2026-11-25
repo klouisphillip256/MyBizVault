@@ -50,7 +50,15 @@ META_APP_SECRET=...
 META_VERIFY_TOKEN=long-random-secret
 ```
 
-The owner only endpoint `/api/businesses/{business_id}/delivery/provider-tests` probes Brevo, Africa's Talking, and Meta credentials without sending messages. Status webhook endpoints are `/api/webhooks/brevo`, `/api/webhooks/africas-talking?token=AT_WEBHOOK_TOKEN`, and `/api/webhooks/meta`. Configure Brevo authorization as `Bearer BREVO_WEBHOOK_TOKEN`; Meta must sign requests with the app secret. The Africa's Talking sandbox USSD callback URL is `/api/ussd/callback?token=USSD_CALLBACK_TOKEN`. Protect the callback token in URLs and logs. Test with fictional customers in the sandbox simulator.
+The owner only endpoint `/api/businesses/{business_id}/delivery/provider-tests` checks Brevo, Africa's Talking, and Meta credentials without sending messages. It also checks whether `BREVO_SENDER_EMAIL` appears as an active sender in Brevo. Use these production callbacks:
+
+| Provider dashboard setting | Callback URL | Authentication |
+| --- | --- | --- |
+| Africa's Talking sandbox USSD service code callback | `https://mybizvault.vercel.app/api/ussd/callback?token=<USSD_CALLBACK_TOKEN>` | URL token matching the backend environment variable |
+| Africa's Talking SMS delivery reports | `https://mybizvault.vercel.app/api/webhooks/africas-talking?token=<AT_WEBHOOK_TOKEN>` | URL token matching the backend environment variable |
+| Brevo transactional email events | `https://mybizvault.vercel.app/api/webhooks/brevo` | Brevo webhook `auth.type=bearer`, `auth.token` matching `BREVO_WEBHOOK_TOKEN` |
+
+There is no inbound SMS receiver in this version; leave the Africa's Talking incoming SMS callback unset. The USSD approval flow uses a sandbox SMS PIN and the USSD callback, not an inbound SMS reply. Never put real callback tokens into source files or public issue trackers. Test with fictional customers in the Africa's Talking simulator.
 
 ## Public verification
 

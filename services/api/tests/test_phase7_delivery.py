@@ -97,3 +97,24 @@ def test_meta_and_at_webhooks_require_shared_secrets(clients, monkeypatch):
     assert client.post("/api/webhooks/africas-talking", data={"id": "fictional"}).status_code == 403
     assert client.post("/api/webhooks/africas-talking?token=fictional-callback-token",
         data={"id": "fictional", "status": "Success"}).status_code == 200
+
+
+def test_brevo_sender_probe_matches_configured_active_sender(monkeypatch):
+    from app.modules import delivery_routes
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self):
+            return b'{"senders":[{"email":"sender@example.com","active":true}]}'
+
+    monkeypatch.setattr(settings, "brevo_api_key", "test-key")
+    monkeypatch.setattr(settings, "brevo_sender_email", "Sender@Example.com")
+    monkeypatch.setattr(delivery_routes, "urlopen", lambda *_args, **_kwargs: Response())
+    assert delivery_routes._brevo_sender_status() == "active"
+    monkeypatch.setattr(settings, "brevo_sender_email", "other@example.com")
+    assert delivery_routes._brevo_sender_status() == "not_found"
