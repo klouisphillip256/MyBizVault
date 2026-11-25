@@ -20,7 +20,7 @@ STORAGE_BACKEND=database
 
 Database storage keeps private Vault bytes outside the serverless function filesystem. It is intended for the prototype's 10 MB per file limit; assess storage cost as usage grows. Session, invitation, and code state are database backed; no continuously running worker is needed.
 
-Run migrations from `services/api` against Neon using an authorized machine or CI job with the same `DATABASE_URL` before opening the application:
+The backend's Vercel production build runs `services/api/build.py` after dependencies are installed. It uses Neon's `DATABASE_URL_UNPOOLED` to apply Alembic migrations and fails the deployment if the migration fails. Outside Vercel, run migrations from `services/api` against Neon using an authorized machine with the same unpooled URL:
 
 ```powershell
 python -m alembic upgrade head
