@@ -1,0 +1,16 @@
+.git
+.vercel
+.env
+.env.*
+!.env.example
+**/.pytest_cache
+**/__pycache__
+**/*.pyc
+**/*.db
+**/*.db-*
+**/*.sqlite3
+**/*.sqlite3-*
+**/vault_objects
+**/node_modules
+**/dist
+**/.venv
