@@ -4,7 +4,7 @@ import {
   Activity, ArrowDownLeft, Bell, BookOpenCheck, BriefcaseBusiness, CalendarClock,
   ChevronRight, CircleAlert, CreditCard, FileCheck2, FileText, FolderClosed,
   Handshake, Home, LogOut, Menu, MessageSquareText, MoreHorizontal,
-  Plus, Search, Settings2, ShieldCheck, Users, Vault,
+  Plus, Scale, Search, Settings2, ShieldCheck, UserRoundSearch, Users, Vault,
 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
@@ -22,6 +22,8 @@ import { VaultPage } from './Vault'
 import { ObligationsPage } from './Obligations'
 import { VoiceAssist } from './VoiceAssist'
 import { ProposalReviewPage } from './ProposalReview'
+import { LegalAssistantPage } from './LegalAssistant'
+import { FindLawyerPage } from './FindLawyer'
 import { clearUserDrafts, deleteTransactionDraft, draftKey, getTransactionDraft, putTransactionDraft, type OfflineTransactionDraft } from '../lib/offlineDrafts'
 
 const nav = [
@@ -34,6 +36,8 @@ const nav = [
   { label: 'Payments', path: '/payments', icon: ArrowDownLeft },
   { label: 'Negotiations', path: '/negotiations', icon: Handshake },
   { label: 'Disputes', path: '/disputes', icon: MessageSquareText },
+  { label: 'Legal Assistant', path: '/legal-assistant', icon: Scale },
+  { label: 'Find a Lawyer', path: '/lawyers', icon: UserRoundSearch },
 ]
 const mobileNav = [
   { label: 'Home', path: '/', icon: Home }, { label: 'Activity', path: '/activity', icon: Activity },
@@ -259,5 +263,5 @@ export default function App() {
   if (error && !(axios.isAxiosError(error) && error.response?.status === 401)) return <div className="boot-screen"><Logo /><ErrorBlock error={error} /><Button onClick={() => refetch()}>Try again</Button></div>
   if (!user) return <AuthScreen onSuccess={() => { queryClient.invalidateQueries({ queryKey: ['me'] }) }} />
   if (!membership) return <div className="boot-screen"><Logo /><p>Your account has no active business membership. Ask the business owner to restore access.</p><Button onClick={async () => { await logout(); await clearUserDrafts(user.id).catch(() => {}); queryClient.clear(); window.location.reload() }}>Sign out</Button></div>
-  return <DashboardLayout user={user} membership={membership} selectBusiness={selectBusiness}><Routes><Route path="/" element={<HomePage user={user} membership={membership} />} /><Route path="/activity" element={<ActivityPage membership={membership} />} /><Route path="/transactions" element={<TransactionsPage membership={membership} />} /><Route path="/transactions/new" element={<NewTransactionPage membership={membership} userId={user.id} />} /><Route path="/transactions/:transactionId" element={<TransactionDetailPage membership={membership} />} /><Route path="/customers" element={<CustomersPage membership={membership} />} /><Route path="/payments" element={<ObligationsPage membership={membership} mode="payments" />} /><Route path="/negotiations" element={<ObligationsPage membership={membership} mode="negotiations" />} /><Route path="/disputes" element={<ObligationsPage membership={membership} mode="disputes" />} /><Route path="/agreements" element={<AgreementsPage membership={membership} />} /><Route path="/vault" element={<VaultPage membership={membership} />} /><Route path="/settings" element={<SettingsPage key={membership.business_id} membership={membership} />} /><Route path="/more" element={<MorePage />} /><Route path="*" element={<EmptyState title="Page not found" detail="This page is not part of your workspace." action={<Button asChild><Link to="/">Return home</Link></Button>} />} /></Routes></DashboardLayout>
+  return <DashboardLayout user={user} membership={membership} selectBusiness={selectBusiness}><Routes><Route path="/" element={<HomePage user={user} membership={membership} />} /><Route path="/activity" element={<ActivityPage membership={membership} />} /><Route path="/transactions" element={<TransactionsPage membership={membership} />} /><Route path="/transactions/new" element={<NewTransactionPage membership={membership} userId={user.id} />} /><Route path="/transactions/:transactionId" element={<TransactionDetailPage membership={membership} />} /><Route path="/customers" element={<CustomersPage membership={membership} />} /><Route path="/payments" element={<ObligationsPage membership={membership} mode="payments" />} /><Route path="/negotiations" element={<ObligationsPage membership={membership} mode="negotiations" />} /><Route path="/disputes" element={<ObligationsPage membership={membership} mode="disputes" />} /><Route path="/agreements" element={<AgreementsPage membership={membership} />} /><Route path="/vault" element={<VaultPage membership={membership} />} /><Route path="/legal-assistant" element={<LegalAssistantPage />} /><Route path="/lawyers" element={<FindLawyerPage membership={membership} />} /><Route path="/settings" element={<SettingsPage key={membership.business_id} membership={membership} />} /><Route path="/more" element={<MorePage />} /><Route path="*" element={<EmptyState title="Page not found" detail="This page is not part of your workspace." action={<Button asChild><Link to="/">Return home</Link></Button>} />} /></Routes></DashboardLayout>
 }

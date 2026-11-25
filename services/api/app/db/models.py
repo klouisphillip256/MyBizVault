@@ -345,3 +345,16 @@ class ProposalResponse(Base):
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     verification_method: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class ConsultationRequest(Base):
+    """Private request draft; demonstration lawyer profiles receive no data."""
+    __tablename__ = "consultation_requests"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+    business_id: Mapped[str] = mapped_column(ForeignKey("businesses.id"), index=True)
+    requested_by_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+    profile_id: Mapped[str] = mapped_column(String(40))
+    issue_type: Mapped[str] = mapped_column(String(40))
+    issue_summary: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="draft")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)

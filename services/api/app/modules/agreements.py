@@ -111,7 +111,7 @@ def render_credit_sale(business: Business, transaction: Transaction, customer: C
             f"2. The customer agrees to pay the outstanding UGX {balance:,} by {transaction.due_date.isoformat()}.\n"
             "3. Any correction or change to these terms should be documented as a new agreement version.\n\n"
             "The amount marked paid is a business report and has not been independently verified by MyBizVault.\n"
-            "Commercial context: This record concerns a transaction in Uganda. The Sale of Goods and Supply of Services Act 2017, Electronic Transactions Act 2011 and Electronic Signatures Act 2011 may be relevant according to the facts. Electronic acceptance is logged against a specific version, but identity and legal effect require separate assessment under applicable law.")
+            "Commercial context: This record concerns a transaction in Uganda. The Sale of Goods and Supply of Services Act 2018, Electronic Transactions Act 2011 and Electronic Signatures Act 2011 may be relevant according to the facts. Electronic acceptance is logged against a specific version, but identity and legal effect require separate assessment under applicable law.")
 
 
 def create_draft(db: DbSession, business_id: str, transaction_id: str, user_id: str) -> dict:

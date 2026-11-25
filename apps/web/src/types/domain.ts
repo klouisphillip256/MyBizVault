@@ -200,6 +200,9 @@ export interface PaymentRecord {
 }
 
 export type NegotiationKind = 'extension' | 'instalment_plan' | 'contract_correction' | 'settlement' | 'revised_obligation' | 'payment_dispute'
+
+export type LawyerProfile = { id: string; name: string; specialization: string; focus: string[]; location: string; consultation_method: string; availability: string; fictional: true }
+export type ConsultationRequest = { id: string; profile_id: string; issue_type: string; issue_summary: string; status: 'draft'; created_at: string }
 export interface NegotiationRecord {
   id: string
   transaction_id: string

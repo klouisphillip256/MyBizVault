@@ -180,3 +180,16 @@ class ExternalProposalResponseIn(BaseModel):
 
 class SendInvitationIn(BaseModel):
     channel: Literal["email", "sms", "whatsapp"]
+
+
+class ContractDraftIn(BaseModel):
+    title: str = Field(min_length=3, max_length=180)
+    counterparty_name: str = Field(min_length=2, max_length=160)
+    purpose: str = Field(min_length=10, max_length=3000)
+    payment_terms: str = Field(min_length=5, max_length=2000)
+    obligations: str = Field(min_length=10, max_length=3000)
+
+    @field_validator("title", "counterparty_name", "purpose", "payment_terms", "obligations", mode="before")
+    @classmethod
+    def trim_contract_field(cls, value):
+        return value.strip() if isinstance(value, str) else value

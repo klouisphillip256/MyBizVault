@@ -34,7 +34,7 @@ def test_phase6_upgrade_and_rollback_preserve_older_records(tmp_path):
         assert db.execute("SELECT total_ugx FROM transactions WHERE id='sale'").fetchone()[0] == 1000
         assert db.execute("SELECT transaction_id FROM agreements WHERE id='agreement'").fetchone()[0] == "sale"
         assert db.execute("SELECT client_request_id FROM transactions WHERE id='sale'").fetchone()[0] is None
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0014_unique_initial_receipts"
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone()[0] == "0015_consultation_requests"
     migrate("downgrade", "0005_obligations_negotiation")
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT total_ugx FROM transactions WHERE id='sale'").fetchone()[0] == 1000

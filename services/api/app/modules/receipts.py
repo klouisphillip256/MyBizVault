@@ -142,7 +142,7 @@ def pdf(receipt: Receipt) -> bytes:
     story = [Paragraph("PAYMENT RECEIPT", styles["Title"]),
         p("This receipt records a payment entered by the business. It is not independent proof that funds cleared."),
         Spacer(1, 12), table, Spacer(1, 12),
-        p("Commercial record for a transaction in Uganda. The Sale of Goods and Supply of Services Act 2017, Electronic Transactions Act 2011 and Electronic Signatures Act 2011 may be relevant according to the facts. This document makes no guarantee of enforceability."),
+        p("Commercial record for a transaction in Uganda. The Sale of Goods and Supply of Services Act 2018, Electronic Transactions Act 2011 and Electronic Signatures Act 2011 may be relevant according to the facts. This document makes no guarantee of enforceability."),
         p(f"Snapshot SHA-256: {receipt.snapshot_sha256}")]
     document.build(story)
     return stream.getvalue()
@@ -165,5 +165,29 @@ def agreement_pdf(content: str, agreement_id: str, version: int) -> bytes:
         story.append(Spacer(1, 5))
     story.append(Spacer(1, 10))
     story.append(Paragraph("Electronic response and document history are recorded separately. This PDF does not by itself establish identity or legal enforceability.", styles["Italic"]))
+    document.build(story)
+    return stream.getvalue()
+
+
+def contract_draft_pdf(title: str, business_name: str, counterparty_name: str,
+                       purpose: str, payment_terms: str, obligations: str) -> bytes:
+    """A reviewable draft that uses the existing private Vault storage flow."""
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+
+    stream = io.BytesIO()
+    styles = getSampleStyleSheet()
+    document = SimpleDocTemplate(stream, pagesize=A4, title=title)
+    story = [Paragraph("BUSINESS CONTRACT DRAFT", styles["Title"]),
+        Paragraph(escape(title), styles["Heading2"]),
+        Paragraph("Draft for review. No party has accepted or signed this document in MyBizVault.", styles["Italic"]),
+        Spacer(1, 12)]
+    for label, value in [("Business", business_name), ("Other party", counterparty_name),
+                         ("Purpose and subject", purpose), ("Payment terms", payment_terms),
+                         ("Obligations and delivery", obligations)]:
+        story.extend([Paragraph(escape(label), styles["Heading3"]),
+                      Paragraph(escape(value).replace("\n", "<br/>"), styles["Normal"]), Spacer(1, 8)])
+    story.append(Paragraph("Before use, confirm dates, remedies, dispute terms and legal suitability with the other party or a qualified lawyer. This draft is not an accepted agreement.", styles["Italic"]))
     document.build(story)
     return stream.getvalue()

@@ -3,12 +3,25 @@ from typing import Literal
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from sqlalchemy.orm import Session as DbSession
 
-from app.db.models import Membership, User
+from app.db.models import Business, Membership, User
 from app.db.session import get_db
-from app.modules import auth, vault
+from app.modules import auth, receipts, vault
+from app.modules.schemas import ContractDraftIn
 from app.modules.business import require_manage_agreements, require_manage_documents, require_view_documents
 
 router = APIRouter(prefix="/api/businesses/{business_id}")
+
+
+@router.post("/contracts/drafts", status_code=201)
+def contract_draft(business_id: str, payload: ContractDraftIn,
+                   _membership: Membership = Depends(require_manage_documents),
+                   actor: tuple[User, object] = Depends(auth.csrf_session),
+                   db: DbSession = Depends(get_db)):
+    business = db.get(Business, business_id)
+    data = receipts.contract_draft_pdf(payload.title, business.name, payload.counterparty_name,
+        payload.purpose, payload.payment_terms, payload.obligations)
+    return vault.create_upload(db, business_id, actor[0].id, payload.title, "contract",
+        "contract-draft.pdf", data)
 
 
 @router.get("/documents")

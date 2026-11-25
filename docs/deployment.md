@@ -4,7 +4,7 @@ The root `vercel.json` routes `/api/*` to FastAPI and all other paths to the Vit
 
 ## Prerequisites
 
-Create a Neon PostgreSQL database and keep its connection string private. Use a direct connection for Alembic migrations; the API may use a pooled URL. Back up a populated database before upgrading it. The schema must reach revision `0014_unique_initial_receipts`. Restore a tested backup to undo a release involving data; downgrading a populated schema may discard newer records.
+Create a Neon PostgreSQL database and keep its connection string private. Use a direct connection for Alembic migrations; the API may use a pooled URL. Back up a populated database before upgrading it. The schema must reach revision `0015_consultation_requests`. Restore a tested backup to undo a release involving data; downgrading a populated schema may discard newer records.
 
 Create a Vercel project from the private GitHub repository with the repository root as project root. The root `vercel.json` declares frontend (`apps/web`) and backend (`services/api`) services. The backend uses Python 3.13 and `app.main:app`. Confirm both services and the `/api/*` route in deployment output.
 

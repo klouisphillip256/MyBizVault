@@ -11,6 +11,7 @@ from app.modules.obligation_routes import router as obligation_router
 from app.modules.proposal_routes import router as proposal_router
 from app.modules.delivery_routes import router as delivery_router
 from app.modules.ussd_routes import router as ussd_router
+from app.modules.lawyer_routes import router as lawyer_router
 
 app = FastAPI(title="MyBizVault API", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_origin],
@@ -23,6 +24,7 @@ app.include_router(obligation_router)
 app.include_router(proposal_router)
 app.include_router(delivery_router)
 app.include_router(ussd_router)
+app.include_router(lawyer_router)
 
 
 @app.get("/api/health")
