@@ -1,7 +1,7 @@
 """Add an idempotent, fictional transaction walkthrough to one existing business.
 
 Run with DATABASE_URL from a trusted secret manager:
-    python scripts/seed_demo.py --business "Business name"
+    python -m scripts.seed_demo --business "Business name"
 No invitation, email, SMS, or approval is sent or fabricated.
 """
 
