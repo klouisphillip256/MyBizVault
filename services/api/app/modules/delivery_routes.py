@@ -82,7 +82,7 @@ async def brevo_webhook(request: Request, authorization: str | None = Header(Non
         message_id = event.get("message-id") or event.get("messageId")
         kind = event.get("event")
         status = "delivered" if kind == "delivered" else "failed" if kind in {
-            "hard_bounce", "soft_bounce", "blocked", "invalid", "error"} else None
+            "hard_bounce", "soft_bounce", "blocked", "invalid", "invalid_email", "spam", "error"} else None
         if message_id and status:
             updated += communications.update_from_webhook(db, "brevo", str(message_id), status)
     return {"updated": updated}
